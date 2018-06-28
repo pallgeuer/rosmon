@@ -3,40 +3,88 @@
 
 #include "mon_gui.h"
 
+#if HAVE_PLUGINLIB_NEW_HEADERS
+#include <pluginlib/class_list_macros.hpp>
+#else
 #include <pluginlib/class_list_macros.h>
+#endif
 
 #include <QMenu>
 #include <QMessageBox>
+#include <QTimer>
+#include <QDebug>
+#include <QSortFilterProxyModel>
 
 #include <rosmon/StartStop.h>
 
 #include <ros/service.h>
 
+#include <thread>
+
+#include "bar_delegate.h"
+
 namespace rosmon
 {
-
-MonGUI::MonGUI()
-{
-}
-
-MonGUI::~MonGUI()
-{
-}
 
 void MonGUI::initPlugin(qt_gui_cpp::PluginContext& ctx)
 {
 	m_w = new QWidget;
 	m_ui.setupUi(m_w);
 
-	m_model = new MonModel(getNodeHandle(), this);
+	m_rosmonModel = new ROSMonModel(this);
+	m_ui.nodeBox->setModel(m_rosmonModel);
 
-	connect(m_ui.nodeEdit, SIGNAL(textChanged(QString)),
-		m_model, SLOT(setNamespace(QString))
+	m_model = new NodeModel(getNodeHandle(), this);
+
+#if QT_VERSION_MAJOR >= 5
+	m_ui.nodeBox->setCurrentText("[auto]");
+#else
+	m_ui.nodeBox->setEditText("[auto]");
+#endif
+
+	connect(m_ui.nodeBox, SIGNAL(editTextChanged(QString)),
+		SLOT(setNamespace(QString))
 	);
 
-	m_ui.tableView->setModel(m_model);
+	auto sortFilterProxy = new QSortFilterProxyModel(this);
+	sortFilterProxy->setSourceModel(m_model);
+	sortFilterProxy->setDynamicSortFilter(true);
+	m_ui.tableView->setModel(sortFilterProxy);
 
+	m_ui.tableView->setSortingEnabled(true);
+	m_ui.tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+	m_ui.tableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
 	m_ui.tableView->setContextMenuPolicy(Qt::CustomContextMenu);
+
+	// Display colored bar graph for CPU load
+	{
+		auto loadDelegate = new BarDelegate(m_ui.tableView);
+		int numCores = std::thread::hardware_concurrency();
+		if(numCores <= 0)
+			numCores = 1;
+
+		loadDelegate->setRange(0.0, numCores);
+		m_ui.tableView->setItemDelegateForColumn(NodeModel::COL_LOAD,
+			loadDelegate
+		);
+	}
+
+	// Display colored bar graph for memory consumption
+	{
+		auto memDelegate = new BarDelegate(m_ui.tableView);
+
+		long int av_pages = sysconf(_SC_PHYS_PAGES);
+		long int page_size = sysconf(_SC_PAGESIZE);
+		int64_t availableMemory = av_pages * page_size;
+		if(availableMemory < 0)
+			availableMemory = 1;
+
+		memDelegate->setRange(0.0, availableMemory);
+		m_ui.tableView->setItemDelegateForColumn(NodeModel::COL_MEMORY,
+			memDelegate
+		);
+	}
+
 	connect(m_ui.tableView, SIGNAL(customContextMenuRequested(QPoint)),
 		SLOT(showContextMenu(QPoint))
 	);
@@ -44,7 +92,12 @@ void MonGUI::initPlugin(qt_gui_cpp::PluginContext& ctx)
 		m_ui.tableView, SLOT(resizeRowsToContents())
 	);
 
+	m_autoTimer = new QTimer(this);
+	m_autoTimer->setInterval(1000);
+	connect(m_autoTimer, SIGNAL(timeout()), SLOT(checkAutoTopic()));
+
 	ctx.addWidget(m_w);
+	setNamespace("[auto]");
 }
 
 void MonGUI::shutdownPlugin()
@@ -57,7 +110,8 @@ void MonGUI::restoreSettings(const qt_gui_cpp::Settings& pluginSettings, const q
 	if(instanceSettings.contains("namespace"))
 	{
 		QString ns = instanceSettings.value("namespace").toString();
-		m_ui.nodeEdit->setText(ns);
+		m_ui.nodeBox->setEditText(ns);
+		setNamespace(ns);
 	}
 
 	if(instanceSettings.contains("viewState"))
@@ -66,7 +120,7 @@ void MonGUI::restoreSettings(const qt_gui_cpp::Settings& pluginSettings, const q
 
 void MonGUI::saveSettings(qt_gui_cpp::Settings& pluginSettings, qt_gui_cpp::Settings& instanceSettings) const
 {
-	instanceSettings.setValue("namespace", m_ui.nodeEdit->text());
+	instanceSettings.setValue("namespace", m_ui.nodeBox->currentText());
 	instanceSettings.setValue("viewState", m_ui.tableView->horizontalHeader()->saveState());
 }
 
@@ -96,8 +150,36 @@ void MonGUI::showContextMenu(const QPoint& point)
 		srv.request.node = m_model->nodeName(index.row()).toStdString();
 		srv.request.action = triggered->property("action").toInt();
 
-		if(!ros::service::call(m_ui.nodeEdit->text().toStdString() + "/start_stop", srv))
+		if(!ros::service::call(m_model->namespaceString().toStdString() + "/start_stop", srv))
 			QMessageBox::critical(m_w, "Failure", "Could not call start_stop service");
+	}
+}
+
+void MonGUI::checkAutoTopic()
+{
+	// Stupid heuristic: Select the first matching
+	if(m_rosmonModel->rowCount(QModelIndex()) > 1)
+	{
+		QString ns = m_rosmonModel->data(m_rosmonModel->index(1), Qt::DisplayRole).toString();
+
+		if(m_model->namespaceString() != ns)
+			m_model->setNamespace(ns);
+	}
+	else
+		m_model->setNamespace("");
+}
+
+void MonGUI::setNamespace(const QString& ns)
+{
+	if(ns == "[auto]")
+	{
+		checkAutoTopic();
+		m_autoTimer->start();
+	}
+	else
+	{
+		m_model->setNamespace(ns);
+		m_autoTimer->stop();
 	}
 }
 

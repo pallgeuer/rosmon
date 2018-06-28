@@ -9,6 +9,16 @@
 #include <ros/console_backend.h>
 #include <ros/this_node.h>
 
+#include <boost/filesystem.hpp>
+
+#include <unistd.h>
+#include <getopt.h>
+#include <csignal>
+
+#include <iostream>
+
+#include <fmt/format.h>
+
 #include "launch/launch_config.h"
 #include "monitor/monitor.h"
 #include "ui.h"
@@ -17,19 +27,11 @@
 #include "fd_watcher.h"
 #include "logger.h"
 
-#include <boost/filesystem.hpp>
-
-#include <unistd.h>
-#include <getopt.h>
-#include <signal.h>
-
-#include <iostream>
-
 namespace fs = boost::filesystem;
 
 bool g_shouldStop = false;
 
-static fs::path findFile(const fs::path& base, const std::string name)
+static fs::path findFile(const fs::path& base, const std::string& name)
 {
 	for(fs::directory_iterator it(base); it != fs::directory_iterator(); ++it)
 	{
@@ -79,18 +81,25 @@ void handleSIGINT(int)
 
 void logToStdout(const std::string& channel, const std::string& str)
 {
-	printf("%20s: %s\n", channel.c_str(), str.c_str());
+	std::string clean = str;
+	unsigned int len = clean.length();
+	while(len != 0 && (clean[len-1] == '\n' || clean[len-1] == '\r'))
+		len--;
+
+	clean.resize(len);
+
+	fmt::print("{:>20}: {}\n", channel, clean);
 }
 
 // Options
 static const struct option OPTIONS[] = {
-	{"disable-ui", no_argument, NULL, 'd'},
-	{"benchmark", no_argument, NULL, 'b'},
-	{"help", no_argument, NULL, 'h'},
-	{"list-args", no_argument, NULL, 'L'},
-	{"log",  required_argument, NULL, 'l'},
-	{"name", required_argument, NULL, 'n'},
-	{NULL, 0, NULL, 0}
+	{"disable-ui", no_argument, nullptr, 'd'},
+	{"benchmark", no_argument, nullptr, 'b'},
+	{"help", no_argument, nullptr, 'h'},
+	{"list-args", no_argument, nullptr, 'L'},
+	{"log",  required_argument, nullptr, 'l'},
+	{"name", required_argument, nullptr, 'n'},
+	{nullptr, 0, nullptr, 0}
 };
 
 enum Action {
@@ -109,7 +118,7 @@ int main(int argc, char** argv)
 	bool enableUI = true;
 
 	// Parse options
-	while(1)
+	while(true)
 	{
 		int option_index;
 		int c = getopt_long(argc, argv, "h", OPTIONS, &option_index);
@@ -170,14 +179,14 @@ int main(int argc, char** argv)
 		std::string package = rosmon::PackageRegistry::getPath(packageName);
 		if(package.empty())
 		{
-			fprintf(stderr, "Could not find path of package '%s'\n", packageName);
+			fmt::print(stderr, "Could not find path of package '{}'\n", packageName);
 			return 1;
 		}
 
 		fs::path path = findFile(package, fileName);
 		if(path.empty())
 		{
-			fprintf(stderr, "Could not find launch file '%s' in package '%s'\n",
+			fmt::print(stderr, "Could not find launch file '{}' in package '{}'\n",
 				fileName, packageName
 			);
 			return 1;
@@ -205,8 +214,9 @@ int main(int argc, char** argv)
 		{
 			// Log to /tmp by default
 
-			time_t t = time(NULL);
+			time_t t = time(nullptr);
 			tm currentTime;
+			memset(&currentTime, 0, sizeof(currentTime));
 			localtime_r(&t, &currentTime);
 
 			char buf[256];
@@ -229,7 +239,7 @@ int main(int argc, char** argv)
 
 		if(!arg)
 		{
-			fprintf(stderr, "You specified a non-argument after an argument\n");
+			fmt::print(stderr, "You specified a non-argument after an argument\n");
 			return 1;
 		}
 
@@ -249,9 +259,9 @@ int main(int argc, char** argv)
 		config->parse(launchFilePath, onlyArguments);
 		config->evaluateParameters();
 	}
-	catch(rosmon::launch::LaunchConfig::ParseException& e)
+	catch(rosmon::launch::ParseException& e)
 	{
-		fprintf(stderr, "Could not load launch file: %s\n", e.what());
+		fmt::print(stderr, "Could not load launch file: {}\n", e.what());
 		return 1;
 	}
 
@@ -291,32 +301,32 @@ int main(int argc, char** argv)
 
 	// Check connectivity to ROS master
 	{
-		printf("ROS_MASTER_URI: '%s'\n", ros::master::getURI().c_str());
+		fmt::print("ROS_MASTER_URI: '{}'\n", ros::master::getURI());
 		if(ros::master::check())
 		{
-			printf("roscore is already running.\n");
+			fmt::print("roscore is already running.\n");
 		}
 		else
 		{
-			printf("Starting own roscore...\n");
-			fprintf(stderr, "Scratch that, I can't do that yet. Exiting...\n");
+			fmt::print("Starting own roscore...\n");
+			fmt::print(stderr, "Scratch that, I can't do that yet. Exiting...\n");
 			return 1;
 		}
 	}
 
 	ros::NodeHandle nh;
 
-	printf("Running as '%s'\n", ros::this_node::getName().c_str());
+	fmt::print("Running as '{}'\n", ros::this_node::getName());
 
 	rosmon::monitor::Monitor monitor(config, watcher);
 	monitor.logMessageSignal.connect(boost::bind(&rosmon::Logger::log, logger.get(), _1, _2));
 
-	printf("\n\n");
+	fmt::print("\n\n");
 	monitor.setParameters();
 
 	if(config->nodes().empty())
 	{
-		printf("No ROS nodes to be launched. Finished...\n");
+		fmt::print("No ROS nodes to be launched. Finished...\n");
 		return 0;
 	}
 
@@ -392,9 +402,10 @@ int main(int argc, char** argv)
 		{
 			if(node->coredumpAvailable())
 			{
-				std::stringstream ss;
-				ss << std::setw(20) << node->name() << ": # " + node->debuggerCommand();
-				ui->log("[rosmon]", ss.str());
+				ui->log(
+					"[rosmon]",
+					fmt::format("{:20}: # {}", node->name(), node->debuggerCommand())
+				);
 			}
 		}
 	}

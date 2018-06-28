@@ -1,18 +1,20 @@
-// Qt model for a rosmon instance
+// Qt model for nodes controlled by a rosmon instance
 // Author: Max Schwarz <max.schwarz@uni-bonn.de>
 
-#include "mon_model.h"
+#include "node_model.h"
 
 #include <QColor>
 
 #include <ros/node_handle.h>
+
+#include "format_data_size.h"
 
 Q_DECLARE_METATYPE(rosmon::StateConstPtr)
 
 namespace rosmon
 {
 
-MonModel::MonModel(ros::NodeHandle& nh, QObject* parent)
+NodeModel::NodeModel(ros::NodeHandle& nh, QObject* parent)
  : QAbstractTableModel(parent)
  , m_nh(nh)
  , m_namespace("/rosmon")
@@ -24,36 +26,37 @@ MonModel::MonModel(ros::NodeHandle& nh, QObject* parent)
 	);
 }
 
-MonModel::~MonModel()
-{
-}
-
-void MonModel::setNamespace(const QString& ns)
+void NodeModel::setNamespace(const QString& ns)
 {
 	m_namespace = ns;
 
-	try
+	if(!ns.isEmpty())
 	{
-		ros::NodeHandle nh(m_nh, ns.toStdString());
-		m_sub_state = nh.subscribe("state", 1, &MonModel::stateReceived, this);
+		try
+		{
+			ros::NodeHandle nh(m_nh, ns.toStdString());
+			m_sub_state = nh.subscribe("state", 1, &NodeModel::stateReceived, this);
+		}
+		catch(ros::InvalidNameException& name)
+		{
+			ROS_WARN("Got invalid name '%s'", qPrintable(ns));
+			m_sub_state.shutdown();
+		}
 	}
-	catch(ros::InvalidNameException& name)
-	{
-		ROS_WARN("Got invalid name '%s'", qPrintable(ns));
+	else
 		m_sub_state.shutdown();
-	}
 
 	beginResetModel();
 	m_entries.clear();
 	endResetModel();
 }
 
-void MonModel::unsubscribe()
+void NodeModel::unsubscribe()
 {
 	m_sub_state.shutdown();
 }
 
-void MonModel::updateState(const rosmon::StateConstPtr& state)
+void NodeModel::updateState(const rosmon::StateConstPtr& state)
 {
 	std::vector<bool> covered(m_entries.size(), false);
 
@@ -63,7 +66,9 @@ void MonModel::updateState(const rosmon::StateConstPtr& state)
 		Entry key;
 		key.name = QString::fromStdString(nodeState.name);
 		key.state = nodeState.state;
-		key.restartCount = nodeState.restartCount;
+		key.restartCount = nodeState.restart_count;
+		key.load = nodeState.system_load + nodeState.user_load;
+		key.memory = nodeState.memory;
 
 		auto it = std::lower_bound(m_entries.begin(), m_entries.end(), key);
 		int row = it - m_entries.begin();
@@ -104,7 +109,7 @@ void MonModel::updateState(const rosmon::StateConstPtr& state)
 	}
 }
 
-int MonModel::rowCount(const QModelIndex& parent) const
+int NodeModel::rowCount(const QModelIndex& parent) const
 {
 	if(parent.isValid())
 		return 0;
@@ -112,7 +117,7 @@ int MonModel::rowCount(const QModelIndex& parent) const
 	return m_entries.size();
 }
 
-int MonModel::columnCount(const QModelIndex& parent) const
+int NodeModel::columnCount(const QModelIndex& parent) const
 {
 	if(parent.isValid())
 		return 0;
@@ -120,7 +125,7 @@ int MonModel::columnCount(const QModelIndex& parent) const
 	return COL_COUNT;
 }
 
-QVariant MonModel::data(const QModelIndex& index, int role) const
+QVariant NodeModel::data(const QModelIndex& index, int role) const
 {
 	if(!index.isValid())
 		return QVariant();
@@ -137,17 +142,39 @@ QVariant MonModel::data(const QModelIndex& index, int role) const
 			{
 				case COL_NAME:
 					return entry.name;
+				case COL_LOAD:
+					return QString::number(entry.load, 'f', 2);
+				case COL_MEMORY:
+					return formattedDataSize(entry.memory, 2);
 				case COL_RESTART_COUNT:
 					return entry.restartCount;
+			}
+			break;
+		case Qt::EditRole:
+			switch(index.column())
+			{
+				case COL_MEMORY:
+					return (uint)entry.memory;
+			}
+			break;
+		case Qt::TextAlignmentRole:
+			switch(index.column())
+			{
+				case COL_NAME:
+					return QVariant();
+				case COL_RESTART_COUNT:
+				case COL_LOAD:
+				case COL_MEMORY:
+					return int(Qt::AlignRight | Qt::AlignVCenter);
 			}
 			break;
 		case Qt::BackgroundColorRole:
 			switch(entry.state)
 			{
-				case rosmon::NodeState::IDLE:
-					return QVariant();
 				case rosmon::NodeState::RUNNING:
-					return QColor(200, 255, 200);
+					return QVariant();
+				case rosmon::NodeState::IDLE:
+					return QColor(200, 200, 200);
 				case rosmon::NodeState::CRASHED:
 					return QColor(255, 100, 100);
 				case rosmon::NodeState::WAITING:
@@ -159,7 +186,7 @@ QVariant MonModel::data(const QModelIndex& index, int role) const
 	return QVariant();
 }
 
-QVariant MonModel::headerData(int section, Qt::Orientation orientation, int role) const
+QVariant NodeModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
 	if(role != Qt::DisplayRole || orientation != Qt::Horizontal)
 		return QAbstractTableModel::headerData(section, orientation, role);
@@ -167,13 +194,15 @@ QVariant MonModel::headerData(int section, Qt::Orientation orientation, int role
 	switch(section)
 	{
 		case COL_NAME:          return "Node";
+		case COL_LOAD:          return "CPU Load";
+		case COL_MEMORY:        return "Memory";
 		case COL_RESTART_COUNT: return "#Restarts";
 	}
 
 	return QVariant();
 }
 
-QString MonModel::nodeName(int row) const
+QString NodeModel::nodeName(int row) const
 {
 	if(row < 0 || row > (int)m_entries.size())
 		return QString();

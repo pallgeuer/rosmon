@@ -7,7 +7,10 @@
 #include <cstdlib>
 #include <ros/node_handle.h>
 
+#include <fmt/format.h>
+
 static unsigned int g_statusLines = 2;
+static std::string g_windowTitle;
 
 void cleanup()
 {
@@ -21,6 +24,10 @@ void cleanup()
 
 	// Switch character echo on
 	term.setEcho(true);
+
+	// Restore window title (at least try)
+	if(!g_windowTitle.empty())
+		term.clearWindowTitle(g_windowTitle + "[-]");
 }
 
 namespace rosmon
@@ -46,6 +53,14 @@ UI::UI(monitor::Monitor* monitor, const FDWatcher::Ptr& fdWatcher)
 
 	// Switch character echo off
 	m_term.setEcho(false);
+
+	// Configure window title
+	std::string title = m_monitor->config()->windowTitle();
+	if(!title.empty())
+	{
+		m_term.setWindowTitle(title);
+		g_windowTitle = title;
+	}
 
 	fdWatcher->registerFD(STDIN_FILENO, boost::bind(&UI::handleInput, this));
 }
@@ -90,9 +105,9 @@ void UI::drawStatusLine()
 
 	// Print menu if a node is selected
 	if(m_selectedNode != -1)
-		printf("Actions: s: start, k: stop, d: debug");
+		fmt::print("Actions: s: start, k: stop, d: debug");
 
-	printf("\n");
+	fmt::print("\n");
 
 	int col = 0;
 
@@ -101,16 +116,6 @@ void UI::drawStatusLine()
 
 	for(auto& node : m_monitor->nodes())
 	{
-		char label[NODE_WIDTH+2];
-		int padding = std::max<int>(0, (NODE_WIDTH - node->name().length())/2);
-
-		for(int i = 0; i < padding; ++i)
-			label[i] = ' ';
-		int c = snprintf(label+padding, NODE_WIDTH+1-padding, "%s", node->name().c_str());
-		for(int i = padding + c; i < NODE_WIDTH; ++i)
-			label[i] = ' ';
-		label[NODE_WIDTH] = 0;
-
 		// Print key with grey background
 		m_term.setSimpleForeground(Terminal::Black);
 
@@ -118,7 +123,7 @@ void UI::drawStatusLine()
 			m_term.setBackgroundColor(0xC8C8C8);
 		else
 			m_term.setSimpleBackground(Terminal::White);
-		printf("%c", key);
+		fmt::print("{:c}", key);
 
 		switch(node->state())
 		{
@@ -136,10 +141,11 @@ void UI::drawStatusLine()
 				break;
 		}
 
+		std::string label = node->name().substr(0, NODE_WIDTH);
 		if(i == m_selectedNode)
-			printf("[%s]", label);
+			fmt::print("[{:^{}}]", label, NODE_WIDTH);
 		else
-			printf(" %s ", label);
+			fmt::print(" {:^{}} ", label, NODE_WIDTH);
 		m_term.setStandardColors();
 
 		// Primitive wrapping control
@@ -181,9 +187,9 @@ void UI::drawStatusLine()
 	g_statusLines = std::max(lines, g_statusLines);
 }
 
-void UI::log(const std::string& channel, const std::string& log)
+void UI::log(const std::string& channel, const std::string& str)
 {
-	std::string clean = log;
+	std::string clean = str;
 
 	auto it = m_nodeColorMap.find(channel);
 
@@ -200,9 +206,9 @@ void UI::log(const std::string& channel, const std::string& log)
 		m_term.setSimplePair(Terminal::Black, Terminal::White);
 	}
 
-	m_term.clearToEndOfLine();
-	printf("%20s:", channel.c_str());
+	fmt::print("{:>20}:", channel);
 	m_term.setStandardColors();
+	m_term.clearToEndOfLine();
 	putchar(' ');
 
 	unsigned int len = clean.length();
@@ -264,7 +270,7 @@ void UI::handleInput()
 		else if(c >= '0' && c <= '9')
 			nodeIndex = 26 + 26 + c - '0';
 
-		if(nodeIndex < 0 || (size_t)nodeIndex > m_monitor->nodes().size())
+		if(nodeIndex < 0 || (size_t)nodeIndex >= m_monitor->nodes().size())
 			return;
 
 		m_selectedNode = nodeIndex;

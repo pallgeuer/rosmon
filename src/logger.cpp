@@ -1,31 +1,30 @@
-// Logs node all output to a log file for the run
+// Logs all output to a log file for the run
 // Author: Max Schwarz <max.schwarz@uni-bonn.de>
 
 #include "logger.h"
 
-#include <sstream>
-
-#include <stdio.h>
-#include <errno.h>
-#include <time.h>
-#include <string.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <stdexcept>
 
 #include <sys/time.h>
 
-#include <stdexcept>
+#include <fmt/format.h>
 
 namespace rosmon
 {
 
 Logger::Logger(const std::string& path)
- : m_file(0)
+ : m_file(nullptr)
 {
-	m_file = fopen(path.c_str(), "w");
+	m_file = fopen(path.c_str(), "we");
 	if(!m_file)
 	{
-		std::stringstream ss;
-		ss << "Could not open log file: " << strerror(errno);
-		throw std::runtime_error(ss.str());
+		throw std::runtime_error(fmt::format(
+			"Could not open log file: {}", strerror(errno)
+		));
 	}
 }
 
@@ -38,9 +37,11 @@ Logger::~Logger()
 void Logger::log(const std::string& source, const std::string& msg)
 {
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+	memset(&tv, 0, sizeof(tv));
+	gettimeofday(&tv, nullptr);
 
 	struct tm btime;
+	memset(&btime, 0, sizeof(tv));
 	localtime_r(&tv.tv_sec, &btime);
 
 	char timeString[100];
@@ -50,7 +51,7 @@ void Logger::log(const std::string& source, const std::string& msg)
 	while(len != 0 && (msg[len-1] == '\n' || msg[len-1] == '\r'))
 		len--;
 
-	fprintf(m_file, "%s.%03ld: %20s: ",
+	fmt::print(m_file, "{}.{:03d}: {:>20}: ",
 		timeString, tv.tv_usec / 1000,
 		source.c_str()
 	);

@@ -8,14 +8,17 @@
 #include <term.h>
 #include <curses.h>
 
-#include <stdio.h>
+#include <cstdio>
 
-#include <boost/regex.hpp>
 
 #include <sys/ioctl.h>
 #include <sys/types.h>
 
+#include <boost/lexical_cast.hpp>
+#include <boost/regex.hpp>
 #include <boost/tokenizer.hpp>
+
+#include <fmt/format.h>
 
 namespace rosmon
 {
@@ -38,7 +41,7 @@ void Terminal::Parser::parseSetAttributes(const std::string& str)
 	for(Tokenizer::iterator it = tok.begin(); it != tok.end(); ++it)
 	{
 		errno = 0;
-		char* endptr = const_cast<char*>(it->c_str());
+		auto endptr = const_cast<char*>(it->c_str());
 		int code = strtoul(it->c_str(), &endptr, 10);
 
 		if(errno != 0 || *endptr != 0)
@@ -123,7 +126,7 @@ Terminal::Terminal()
 {
 	// Override using environment variable
 	char* overrideMode = getenv("ROSMON_COLOR_MODE");
-	const char* termOverride = 0;
+	const char* termOverride = nullptr;
 	if(overrideMode)
 	{
 		if(strcasecmp(overrideMode, "truecolor") == 0)
@@ -145,7 +148,7 @@ Terminal::Terminal()
 		}
 		else
 		{
-			fprintf(stderr, "Warning: Unknown ROSMON_COLOR_MODE value: '%s'\n", overrideMode);
+			fmt::print(stderr, "Warning: Unknown ROSMON_COLOR_MODE value: '{}'\n", overrideMode);
 		}
 	}
 	else
@@ -161,7 +164,7 @@ Terminal::Terminal()
 		}
 
 		char* vte_version = getenv("VTE_VERSION");
-		if(vte_version && atoi(vte_version) >= 3600)
+		if(vte_version && boost::lexical_cast<unsigned int>(vte_version) >= 3600)
 		{
 			m_256colors = true;
 			m_truecolor = true;
@@ -171,7 +174,7 @@ Terminal::Terminal()
 	int ret;
 	if(setupterm(termOverride, STDOUT_FILENO, &ret) != OK)
 	{
-		printf("Could not setup the terminal. Disabling all colors...\n");
+		fmt::print("Could not setup the terminal. Disabling all colors...\n");
 		return;
 	}
 
@@ -189,14 +192,14 @@ Terminal::Terminal()
 		if(bgColor && bgColor != (char*)-1)
 			m_bgColorStr = bgColor;
 		else
-			printf("Your terminal does not support ANSI background!\n");
+			fmt::print("Your terminal does not support ANSI background!\n");
 	}
 	{
 		const char* fgColor = tigetstr("setaf");
 		if(fgColor && fgColor != (char*)-1)
 			m_fgColorStr = fgColor;
 		else
-			printf("Your terminal does not support ANSI foreground!\n");
+			fmt::print("Your terminal does not support ANSI foreground!\n");
 	}
 
 	m_opStr = tigetstr("op");
@@ -205,10 +208,6 @@ Terminal::Terminal()
 	m_upStr = tigetstr("cuu");
 
 	m_boldStr = tigetstr("bold");
-}
-
-Terminal::~Terminal()
-{
 }
 
 bool Terminal::has256Colors() const
@@ -379,6 +378,27 @@ bool Terminal::getSize(int* outColumns, int* outRows)
 	}
 	else
 		return false;
+}
+
+void Terminal::setWindowTitle(const std::string& title)
+{
+	char buf[256];
+
+	// Konsole style
+	snprintf(buf, sizeof(buf), "\033]30;%s\007", title.c_str());
+	fputs(buf, stdout);
+
+	// screen/tmux style
+	snprintf(buf, sizeof(buf), "\033k%s\033\\", title.c_str());
+	fputs(buf, stdout);
+}
+
+void Terminal::clearWindowTitle(const std::string& backup)
+{
+	fputs("\033]30;%d : %n\007", stdout);
+
+	// screen/tmux style
+	fmt::print("\033k{}\033\\", backup);
 }
 
 }

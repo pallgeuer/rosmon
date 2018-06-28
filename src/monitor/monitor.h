@@ -8,6 +8,7 @@
 #include "../launch/launch_config.h"
 
 #include "node_monitor.h"
+#include "linux_process_info.h"
 
 #include <boost/signals2.hpp>
 
@@ -23,8 +24,7 @@ class Monitor
 {
 public:
 public:
-	explicit Monitor(const launch::LaunchConfig::ConstPtr& config, const FDWatcher::Ptr& watcher);
-	~Monitor();
+	explicit Monitor(launch::LaunchConfig::ConstPtr config, FDWatcher::Ptr watcher);
 
 	void setParameters();
 	void start();
@@ -40,11 +40,23 @@ public:
 	std::vector<NodeMonitor::Ptr>& nodes()
 	{ return m_nodes; }
 
+	launch::LaunchConfig::ConstPtr config() const
+	{ return m_config; }
+
 	boost::signals2::signal<void(std::string,std::string)> logMessageSignal;
 private:
-	void log(const char* fmt, ...) __attribute__((format (printf, 2, 3)));
+	struct ProcessInfo
+	{
+		process_info::ProcessStat stat;
+		bool active;
+	};
+
+	template<typename... Args>
+	void log(const char* fmt, const Args& ... args);
 
 	void handleRequiredNodeExit(const std::string& name);
+
+	void updateStats();
 
 	launch::LaunchConfig::ConstPtr m_config;
 
@@ -54,6 +66,14 @@ private:
 	std::vector<NodeMonitor::Ptr> m_nodes;
 
 	bool m_ok;
+
+#if HAVE_STEADYTIMER
+	ros::SteadyTimer m_statTimer;
+#else
+	ros::WallTimer m_statTimer;
+#endif
+
+	std::map<int, ProcessInfo> m_processInfos;
 };
 
 }

@@ -10,18 +10,13 @@
 
 #include <cstdarg>
 
-static std::runtime_error error(const char* fmt, ...)
+#include <fmt/format.h>
+
+template<typename... Args>
+std::runtime_error error(const char* format, const Args& ... args)
 {
-	va_list args;
-	va_start(args, fmt);
-
-	char str[1024];
-
-	vsnprintf(str, sizeof(str), fmt, args);
-
-	va_end(args);
-
-	return std::runtime_error(str);
+	std::string msg = fmt::format(format, args...);
+	return std::runtime_error(msg);
 }
 
 namespace rosmon
@@ -30,10 +25,10 @@ namespace rosmon
 namespace launch
 {
 
-Node::Node(const std::string& name, const std::string& package, const std::string& type)
- : m_name(name)
- , m_package(package)
- , m_type(type)
+Node::Node(std::string name, std::string package, std::string type)
+ : m_name(std::move(name))
+ , m_package(std::move(package))
+ , m_type(std::move(type))
 
  // NOTE: roslaunch documentation seems to suggest that this is true by default,
  //  however, the source tells a different story...
@@ -42,18 +37,14 @@ Node::Node(const std::string& name, const std::string& package, const std::strin
 
  , m_required(false)
  , m_coredumpsEnabled(true)
+ , m_clearParams(false)
 {
 	m_executable = PackageRegistry::getExecutable(m_package, m_type);
 }
 
-Node::~Node()
+void Node::setRemappings(const std::map<std::string, std::string>& remappings)
 {
-}
-
-
-void Node::addRemapping(const std::string& from, const std::string& to)
-{
-	m_remappings[from] = to;
+	m_remappings = remappings;
 }
 
 void Node::addExtraArguments(const std::string& argString)
@@ -62,10 +53,10 @@ void Node::addExtraArguments(const std::string& argString)
 
 	// Get rid of newlines since this confuses wordexp
 	std::string clean = argString;
-	for(unsigned int i = 0; i < clean.length(); ++i)
+	for(auto& c : clean)
 	{
-		if(clean[i] == '\n' || clean[i] == '\r')
-			clean[i] = ' ';
+		if(c == '\n' || c == '\r')
+			c = ' ';
 	}
 
 	// NOTE: This also does full shell expansion (things like $PATH)
@@ -73,10 +64,10 @@ void Node::addExtraArguments(const std::string& argString)
 	//   any case), I think we can use wordexp here.
 	int ret = wordexp(clean.c_str(), &tokens, WRDE_NOCMD);
 	if(ret != 0)
-		throw error("You're supplying something strange in 'args': '%s' (wordexp ret %d)", clean.c_str(), ret);
+		throw error("You're supplying something strange in 'args': '{}' (wordexp ret {})", clean, ret);
 
 	for(unsigned int i = 0; i < tokens.we_wordc; ++i)
-		m_extraArgs.push_back(tokens.we_wordv[i]);
+		m_extraArgs.emplace_back(tokens.we_wordv[i]);
 
 	wordfree(&tokens);
 }
@@ -112,10 +103,10 @@ void Node::setLaunchPrefix(const std::string& launchPrefix)
 
 	// Get rid of newlines since this confuses wordexp
 	std::string clean = launchPrefix;
-	for(unsigned int i = 0; i < clean.length(); ++i)
+	for(auto& c : clean)
 	{
-		if(clean[i] == '\n' || clean[i] == '\r')
-			clean[i] = ' ';
+		if(c == '\n' || c == '\r')
+			c = ' ';
 	}
 
 	// NOTE: This also does full shell expansion (things like $PATH)
@@ -123,10 +114,10 @@ void Node::setLaunchPrefix(const std::string& launchPrefix)
 	//   any case), I think we can use wordexp here.
 	int ret = wordexp(clean.c_str(), &tokens, WRDE_NOCMD);
 	if(ret != 0)
-		throw error("You're supplying something strange in 'launch-prefix': '%s' (wordexp ret %d)", clean.c_str(), ret);
+		throw error("You're supplying something strange in 'launch-prefix': '{}' (wordexp ret {})", clean, ret);
 
 	for(unsigned int i = 0; i < tokens.we_wordc; ++i)
-		m_launchPrefix.push_back(tokens.we_wordv[i]);
+		m_launchPrefix.emplace_back(tokens.we_wordv[i]);
 
 	wordfree(&tokens);
 }
@@ -134,6 +125,16 @@ void Node::setLaunchPrefix(const std::string& launchPrefix)
 void Node::setCoredumpsEnabled(bool on)
 {
 	m_coredumpsEnabled = on;
+}
+
+void Node::setWorkingDirectory(const std::string& cwd)
+{
+	m_workingDirectory = cwd;
+}
+
+void Node::setClearParams(bool on)
+{
+	m_clearParams = on;
 }
 
 }

@@ -1,8 +1,8 @@
-// Qt model for a rosmon instance
+// Qt model for nodes controlled by a rosmon instance
 // Author: Max Schwarz <max.schwarz@uni-bonn.de>
 
-#ifndef MON_MODEL_H
-#define MON_MODEL_H
+#ifndef NODE_MODEL_H
+#define NODE_MODEL_H
 
 #include <QAbstractTableModel>
 
@@ -14,18 +14,28 @@
 namespace rosmon
 {
 
-class MonModel : public QAbstractTableModel
+class NodeModel : public QAbstractTableModel
 {
 Q_OBJECT
 public:
-	explicit MonModel(ros::NodeHandle& nh, QObject* parent = 0);
-	virtual ~MonModel();
+	enum Column
+	{
+		COL_NAME,
+		COL_RESTART_COUNT,
+		COL_LOAD,
+		COL_MEMORY,
 
-	virtual int rowCount(const QModelIndex & parent) const override;
-	virtual int columnCount(const QModelIndex & parent) const override;
-	virtual QVariant data(const QModelIndex & index, int role) const override;
+		COL_COUNT
+	};
 
-	virtual QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
+	explicit NodeModel(ros::NodeHandle& nh, QObject* parent = nullptr);
+	~NodeModel() override = default;
+
+	int rowCount(const QModelIndex & parent) const override;
+	int columnCount(const QModelIndex & parent) const override;
+	QVariant data(const QModelIndex & index, int role) const override;
+
+	QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 	inline QString namespaceString() const
 	{ return m_namespace; }
@@ -47,14 +57,8 @@ private:
 		QString name;
 		int state;
 		int restartCount;
-	};
-
-	enum Column
-	{
-		COL_NAME,
-		COL_RESTART_COUNT,
-
-		COL_COUNT
+		double load;
+		uint64_t memory;
 	};
 
 	ros::NodeHandle m_nh;

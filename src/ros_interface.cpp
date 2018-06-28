@@ -21,10 +21,6 @@ ROSInterface::ROSInterface(monitor::Monitor* monitor)
 	m_srv_startStop = m_nh.advertiseService("start_stop", &ROSInterface::handleStartStop, this);
 }
 
-ROSInterface::~ROSInterface()
-{
-}
-
 void ROSInterface::update()
 {
 	rosmon::State state;
@@ -53,6 +49,13 @@ void ROSInterface::update()
 				nstate.state = nstate.IDLE;
 				break;
 		}
+
+		nstate.restart_count = node->restartCount();
+
+		nstate.user_load = node->userLoad();
+		nstate.system_load = node->systemLoad();
+
+		nstate.memory = node->memory();
 
 		state.nodes.push_back(nstate);
 	}

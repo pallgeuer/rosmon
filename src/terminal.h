@@ -68,7 +68,7 @@ public:
 		//! Apply the current internal state (colors) on the terminal
 		void apply(Terminal* term);
 	private:
-		void parseSetAttributes(const std::string& attrs);
+		void parseSetAttributes(const std::string& str);
 
 		enum State
 		{
@@ -86,7 +86,6 @@ public:
 	};
 
 	Terminal();
-	~Terminal();
 
 	/**
 	 * @brief Set 24-bit foreground color
@@ -155,6 +154,9 @@ public:
 	 **/
 	bool interactive() const
 	{ return m_valid; }
+
+	void setWindowTitle(const std::string& title);
+	void clearWindowTitle(const std::string& backup);
 
 private:
 	bool m_valid;
